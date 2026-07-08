@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 private let panelWidth: CGFloat = 344
 
@@ -56,6 +57,7 @@ private func panelReset(_ date: Date?) -> String {
 
 final class PanelModel: ObservableObject {
     @Published var snapshot: Snapshot?
+    @Published var history: UsageHistory?
     @Published var refreshing = false
     @Published var selectedKey: String?   // "provider:email" of the expanded account
 
@@ -111,7 +113,7 @@ struct UsagePanelView: View {
             providerSections
             if let key = model.selectedKey,
                let account = accounts.first(where: { $0.key == key }) {
-                AccountDetailView(account: account) { model.onRemove(key) }
+                AccountDetailView(account: account, history: model.history) { model.onRemove(key) }
                     .transition(.opacity.combined(with: .move(edge: .top)))
             } else {
                 Text("Tap a ring to see its limits.")
@@ -258,6 +260,7 @@ struct RingCell: View {
 
 struct AccountDetailView: View {
     let account: AccountUsage
+    let history: UsageHistory?
     let onRemove: () -> Void
 
     var body: some View {
@@ -282,12 +285,66 @@ struct AccountDetailView: View {
                 Text("No limits reported.").font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
                 ForEach(Array(account.metrics.enumerated()), id: \.offset) { _, metric in
-                    PanelMetricRow(metric: metric)
+                    VStack(alignment: .leading, spacing: 2) {
+                        PanelMetricRow(metric: metric)
+                        if let note = paceNote(metric) {
+                            Text(note)
+                                .font(.system(size: 10))
+                                .foregroundStyle(metric.percent >= 85 ? Color.red : .orange)
+                        }
+                    }
                 }
+                sparkline
             }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.07)))
+    }
+
+    /// Warns only when the projection lands meaningfully (10m+) before reset.
+    private func paceNote(_ metric: AccountUsage.Metric) -> String? {
+        guard let history, let resetsAt = metric.resetsAt,
+              let eta = UsageHistory.projectedExhaustion(
+                  history.points(for: account.key, metricLabel: metric.label), now: Date()),
+              eta < resetsAt.addingTimeInterval(-10 * 60) else { return nil }
+        return "On pace to hit 100% ≈\(formatGap(resetsAt.timeIntervalSince(eta))) before reset"
+    }
+
+    /// Last 24h of the headline metric; window resets read as sawtooth drops.
+    /// Hidden until an hour of samples exists — less reads as a bare line.
+    @ViewBuilder private var sparkline: some View {
+        let points = sparkPoints
+        if let first = points.first, let last = points.last,
+           last.t.timeIntervalSince(first.t) >= 3600,
+           let headline = account.headlineMetric {
+            let tint = usageTint(headline.percent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(headline.label) · last 24h")
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+                Chart {
+                    RuleMark(y: .value("Limit", 100))
+                        .foregroundStyle(.secondary.opacity(0.3))
+                        .lineStyle(StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+                    ForEach(points, id: \.t) { point in
+                        AreaMark(x: .value("Time", point.t), y: .value("Usage", point.p))
+                            .foregroundStyle(tint.opacity(0.12))
+                        LineMark(x: .value("Time", point.t), y: .value("Usage", point.p))
+                            .foregroundStyle(tint)
+                    }
+                }
+                .chartYScale(domain: 0 ... 100)
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .frame(height: 40)
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private var sparkPoints: [UsageHistory.Point] {
+        guard let history, let headline = account.headlineMetric else { return [] }
+        let cutoff = Date().addingTimeInterval(-24 * 3600)
+        return history.points(for: account.key, metricLabel: headline.label).filter { $0.t >= cutoff }
     }
 }
 

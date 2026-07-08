@@ -20,7 +20,7 @@ targets:
       properties:
         CFBundleDisplayName: AI Usage
         LSUIElement: true
-        CFBundleVersion: "14"
+        CFBundleVersion: "17"
         CFBundleShortVersionString: "1.1"
         CFBundleURLTypes:
           - CFBundleURLName: dev.manishkumar.claudeusage
@@ -52,7 +52,7 @@ targets:
       path: Widget/Info.plist
       properties:
         CFBundleDisplayName: AI Usage
-        CFBundleVersion: "14"
+        CFBundleVersion: "17"
         CFBundleShortVersionString: "1.1"
         EXAppExtensionAttributes:
           EXExtensionPointIdentifier: com.apple.widgetkit-extension

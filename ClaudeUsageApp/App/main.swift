@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clickMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
     private var refreshTimer: Timer?
+    private var history = UsageHistory.load()
 
     private static let refreshInterval: TimeInterval = 300
 
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.action = #selector(togglePanel)
 
         model.snapshot = Snapshot.load()
+        model.history = history
         model.onRefresh = { [weak self] in self?.refresh() }
         model.onAdd = { [weak self] id in self?.captureAccount(providerID: id) }
         model.onRemove = { [weak self] key in self?.removeAccount(key: key) }
@@ -142,6 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.refreshing = false
                 self.model.refreshing = false
                 self.model.snapshot = snap
+                self.history.record(snap)
+                self.model.history = self.history
+                UsageAlerts.evaluate(snap, history: self.history)
                 self.updateStatusTitle()
                 WidgetCenter.shared.reloadAllTimelines()
             }
