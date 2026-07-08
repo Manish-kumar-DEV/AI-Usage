@@ -5,7 +5,8 @@ import AppIntents
 struct UsageEntry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
-    var selectedKey: String? = nil   // chosen account for the small widget
+    var selectedKey: String? = nil       // chosen account for the small widget
+    var providerFilter: String? = nil    // provider id, nil = all providers
 }
 
 // MARK: - Configurable account (small widget can pick which account to show)
@@ -35,9 +36,30 @@ struct AccountQuery: EntityQuery {
     func suggestedEntities() async throws -> [AccountEntity] { all() }
 }
 
+/// Per-widget provider filter, so several placed widgets can each track one
+/// provider's accounts (the widget can't scroll, so this is how many
+/// accounts scale: one widget per provider).
+enum ProviderChoice: String, AppEnum {
+    case all, claude, antigravity
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation { "Provider" }
+    static var caseDisplayRepresentations: [ProviderChoice: DisplayRepresentation] = [
+        .all: "All providers", .claude: "Claude", .antigravity: "Antigravity",
+    ]
+
+    var providerID: String? {
+        switch self {
+        case .all: return nil
+        case .claude: return "claude"
+        case .antigravity: return "gemini"
+        }
+    }
+}
+
 struct SelectAccountIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Choose Account"
-    static var description = IntentDescription("Pick which account the small widget shows. Larger sizes show all accounts.")
+    static var description = IntentDescription("Filter the widget to one provider, or pick the single account the small widget shows.")
+    @Parameter(title: "Provider", default: .all) var provider: ProviderChoice?
     @Parameter(title: "Account") var account: AccountEntity?
     init() {}
 }
@@ -49,10 +71,12 @@ struct UsageProvider: AppIntentTimelineProvider {
         UsageEntry(date: .now, snapshot: nil)
     }
     func snapshot(for configuration: SelectAccountIntent, in context: Context) async -> UsageEntry {
-        UsageEntry(date: .now, snapshot: Snapshot.load(), selectedKey: configuration.account?.id)
+        UsageEntry(date: .now, snapshot: Snapshot.load(), selectedKey: configuration.account?.id,
+                   providerFilter: configuration.provider?.providerID)
     }
     func timeline(for configuration: SelectAccountIntent, in context: Context) async -> Timeline<UsageEntry> {
-        let entry = UsageEntry(date: .now, snapshot: Snapshot.load(), selectedKey: configuration.account?.id)
+        let entry = UsageEntry(date: .now, snapshot: Snapshot.load(), selectedKey: configuration.account?.id,
+                               providerFilter: configuration.provider?.providerID)
         return Timeline(entries: [entry], policy: .after(.now + 15 * 60))
     }
 }
@@ -73,7 +97,11 @@ struct UsageWidgetView: View {
     var entry: UsageEntry
     @Environment(\.widgetFamily) private var family
 
-    private var accounts: [AccountUsage] { entry.snapshot?.accounts ?? [] }
+    private var accounts: [AccountUsage] {
+        let all = entry.snapshot?.accounts ?? []
+        guard let filter = entry.providerFilter else { return all }
+        return all.filter { $0.provider == filter }
+    }
     private var byUrgency: [AccountUsage] {
         accounts.sorted { ($0.headlineMetric?.percent ?? 0) > ($1.headlineMetric?.percent ?? 0) }
     }
@@ -99,7 +127,10 @@ struct UsageWidgetView: View {
         // ⇒ inset = 23 − 11), so the gap is uniform along the edges AND around
         // the curve — like the medium card's icon. Medium 13; large 13/10.
         .padding(.horizontal, family == .systemSmall ? 12 : 13)
-        .padding(.vertical, family == .systemSmall ? 12 : family == .systemLarge ? 10 : 13)
+        // Medium drops to the large widget's 10pt when the overflow footer
+        // needs the extra height (4 cards + footer > the usable 132pt at 13).
+        .padding(.vertical, family == .systemSmall ? 12
+                 : family == .systemLarge || (family == .systemMedium && accounts.count > 4) ? 10 : 13)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .widgetURL(widgetOpenURL(family == .systemSmall ? smallAccount : nil))
     }
@@ -110,29 +141,50 @@ struct UsageWidgetView: View {
 
     // Cards fill the available height so the outer padding stays uniform on all
     // four sides regardless of family or account count.
+    /// Overflow footer: widgets can't scroll, so surplus accounts are named
+    /// rather than silently dropped. Tapping opens the panel, which shows all.
+    private func moreRow(_ hidden: Int) -> some View {
+        Link(destination: widgetOpenURL()) {
+            Text("+\(hidden) more · most urgent shown")
+                .font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.05)))
+        }
+    }
+
     private var medium: some View {
         let shown = Array(byUrgency.prefix(4))
-        return VStack(spacing: 8) {
+        // The footer only fits alongside 4 cards with tightened spacing/cards.
+        let overflowing = accounts.count > shown.count
+        return VStack(spacing: overflowing ? 6 : 8) {
             ForEach(Array(rows(shown).enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 8) {
                     ForEach(Array(row.enumerated()), id: \.offset) { _, a in
-                        Link(destination: widgetOpenURL(a)) { MiniCard(account: a) }
+                        Link(destination: widgetOpenURL(a)) { MiniCard(account: a, compact: overflowing) }
                     }
                     if row.count < 2 { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
                 }
                 .frame(maxHeight: .infinity)
             }
+            if overflowing { moreRow(accounts.count - shown.count) }
         }
         .frame(maxHeight: .infinity)
     }
 
     private var large: some View {
-        let shown = Array(accounts.prefix(6))   // snapshot is already provider-grouped
-        return VStack(spacing: 8) {
+        // Widgets can't scroll; 6 rows only fit with tightened cards
+        // (6 × regular 56pt card > the ~334pt of usable height). Beyond 6,
+        // show the most urgent 6 plus an overflow footer.
+        let overflowing = accounts.count > 6
+        let shown = overflowing ? Array(byUrgency.prefix(6)) : accounts   // grouped order when all fit
+        let compact = shown.count >= 6
+        return VStack(spacing: compact ? 6 : 8) {
             ForEach(Array(shown.enumerated()), id: \.offset) { _, a in
-                Link(destination: widgetOpenURL(a)) { WideCard(account: a) }
+                Link(destination: widgetOpenURL(a)) { WideCard(account: a, compact: compact) }
                     .frame(maxHeight: .infinity)
             }
+            if overflowing { moreRow(accounts.count - shown.count) }
         }
         .frame(maxHeight: .infinity)
     }

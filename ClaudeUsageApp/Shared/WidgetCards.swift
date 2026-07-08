@@ -105,6 +105,7 @@ struct HeroCard: View {
 
 struct MiniCard: View {
     let account: AccountUsage
+    var compact = false   // tightened so 4 cards + overflow footer fit the medium widget
     var body: some View {
         card {
             VStack(alignment: .leading, spacing: 2) {
@@ -117,7 +118,7 @@ struct MiniCard: View {
                 Spacer(minLength: 0)
                 if let head = account.headlineMetric {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text("\(Int(head.percent))").font(.system(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(Brand.number(head.percent))
+                        Text("\(Int(head.percent))").font(.system(size: compact ? 20 : 24, weight: .bold).monospacedDigit()).foregroundStyle(Brand.number(head.percent))
                         Text("%").font(.system(size: 11, weight: .semibold)).foregroundStyle(mute)
                         Spacer(minLength: 4)
                         Text(head.label).font(.system(size: 9, weight: .medium)).foregroundStyle(mute).lineLimit(1)
@@ -126,7 +127,7 @@ struct MiniCard: View {
                     Text("session error").font(.system(size: 10)).foregroundStyle(Brand.danger)
                 }
             }
-            .padding(10)
+            .padding(compact ? 6 : 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
@@ -136,18 +137,20 @@ struct MiniCard: View {
 
 struct WideCard: View {
     let account: AccountUsage
+    var compact = false   // tightened metrics so 6 rows fit the large widget
+    private var ringSize: CGFloat { compact ? 34 : 40 }
     var body: some View {
         card {
             HStack(spacing: 12) {
                 if account.headlineMetric != nil {
-                    RingGauge(percent: account.headlineMetric!.percent, size: 40, lineWidth: 4)
+                    RingGauge(percent: account.headlineMetric!.percent, size: ringSize, lineWidth: 4)
                 } else {
                     ZStack {
                         Circle().stroke(Color.primary.opacity(0.12), lineWidth: 4)
                         Image(systemName: "exclamationmark").font(.system(size: 14, weight: .bold)).foregroundStyle(mute)
-                    }.frame(width: 40, height: 40)
+                    }.frame(width: ringSize, height: ringSize)
                 }
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: compact ? 2 : 5) {
                     HStack(spacing: 6) {
                         ProviderTile(provider: account.provider, size: 17)
                         Text(account.email).font(.system(size: 12, weight: .semibold)).foregroundStyle(ink).lineLimit(1).truncationMode(.middle)
@@ -174,8 +177,10 @@ struct WideCard: View {
                     }
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, compact ? 5 : 8)
+            // Fill the row's share of the height so spare space grows the
+            // cards instead of pooling as oversized gaps between rows.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
     }
 }
