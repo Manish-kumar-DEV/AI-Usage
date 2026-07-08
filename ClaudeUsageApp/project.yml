@@ -1,0 +1,64 @@
+name: ClaudeUsage
+options:
+  bundleIdPrefix: dev.manishkumar
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: V4G7W2HGMF
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.9"
+targets:
+  ClaudeUsage:
+    type: application
+    platform: macOS
+    sources:
+      - App
+      - Shared
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: AI Usage
+        LSUIElement: true
+        CFBundleVersion: "14"
+        CFBundleShortVersionString: "1.1"
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.manishkumar.claudeusage
+            CFBundleURLSchemes: [claudeusage]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.manishkumar.claudeusage
+        PRODUCT_NAME: AI Usage
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - target: ClaudeUsageWidget
+        embed: true
+  ClaudeUsageWidget:
+    type: extensionkit-extension
+    platform: macOS
+    sources:
+      - Widget
+      - Shared/Models.swift
+      - Shared/ProviderMarks.swift
+      - Shared/WidgetCards.swift
+      - Shared/Assets.xcassets
+    entitlements:
+      path: Widget/Widget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.temporary-exception.files.home-relative-path.read-only:
+          - /Library/Application Support/ClaudeUsage/
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: AI Usage
+        CFBundleVersion: "14"
+        CFBundleShortVersionString: "1.1"
+        EXAppExtensionAttributes:
+          EXExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        # Fresh bundle id: chronod cached a broken descriptor for the old
+        # ".widget" id (from the AppIntentConfiguration era) and TCC blocks
+        # clearing its DB, so a new id forces a clean re-extraction.
+        PRODUCT_BUNDLE_IDENTIFIER: dev.manishkumar.claudeusage.usagewidget
